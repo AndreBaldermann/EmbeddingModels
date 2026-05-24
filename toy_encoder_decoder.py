@@ -29,6 +29,7 @@ def randn(r, c, scale=0.2):
     return [[random.gauss(0, scale) for _ in range(c)] for _ in range(r)]
 
 def matmul(A, B):
+    # A: (m x n), B: (n x p) => (m x p)
     m, n, p = len(A), len(A[0]), len(B[0])
     out = zeros(m, p)
     for i in range(m):
@@ -64,33 +65,11 @@ def sum_rows(A):
             s[j] += row[j]
     return [s]
 
-def print_latent_axis(samples, latents, width=61):
-    min_v = min(latents)
-    max_v = max(latents)
-    span = max(max_v - min_v, 1e-9)
-
-    axis = ["-"] * width
-    zero_pos = int(round((0 - min_v) / span * (width - 1)))
-    zero_pos = max(0, min(width - 1, zero_pos))
-    axis[zero_pos] = "|"
-
-    print("\nLatent Space (1D Koordinatensystem):")
-    print(f"min={min_v:.3f} 0={0.0:.3f} max={max_v:.3f}")
-    print("".join(axis))
-
-    for i, (sample, z) in enumerate(zip(samples, latents)):
-        pos = int(round((z - min_v) / span * (width - 1)))
-        pos = max(0, min(width - 1, pos))
-        line = [" "] * width
-        line[pos] = "x"
-        sample_bits = "".join(str(v) for v in sample)
-        print(f"{i:02d} {''.join(line)} z={z:+.3f} sample={sample_bits}")
-
 # --- 3) Modell: Encoder + Decoder -----------------------------------------
-# Encoder: 6 -> 1, Decoder: 1 -> 6
-W_enc = randn(6, 1)
-b_enc = zeros(1, 1)
-W_dec = randn(1, 6)
+# Encoder: 6 -> 2, Decoder: 2 -> 6
+W_enc = randn(6, 2)
+b_enc = zeros(1, 2)
+W_dec = randn(2, 6)
 b_dec = zeros(1, 6)
 
 lr = 0.3
@@ -99,11 +78,13 @@ n = len(X)
 
 # --- 4) Training -----------------------------------------------------------
 for epoch in range(1, epochs + 1):
+    # Vorwärts
     Z = add_bias(matmul(X, W_enc), b_enc)
     H = apply_fn(Z, tanh)
     O = add_bias(matmul(H, W_dec), b_dec)
     Y = apply_fn(O, sigmoid)
 
+    # Loss (Binary Cross Entropy)
     eps = 1e-9
     loss = 0.0
     for i in range(n):
@@ -113,6 +94,7 @@ for epoch in range(1, epochs + 1):
             loss += -(xij * math.log(yij + eps) + (1 - xij) * math.log(1 - yij + eps))
     loss /= n * 6
 
+    # Rückwärts
     dO = zeros(n, 6)
     for i in range(n):
         for j in range(6):
@@ -123,14 +105,16 @@ for epoch in range(1, epochs + 1):
 
     dH = matmul(dO, transpose(W_dec))
 
-    tanh_grad = zeros(n, 1)
+    tanh_grad = zeros(n, 2)
     for i in range(n):
-        tanh_grad[i][0] = 1 - H[i][0] * H[i][0]
+        for j in range(2):
+            tanh_grad[i][j] = 1 - H[i][j] * H[i][j]
     dZ = hadamard(dH, tanh_grad)
 
     dW_enc = matmul(transpose(X), dZ)
     db_enc = sum_rows(dZ)
 
+    # Update
     W_dec = sub(W_dec, scalar_mul(dW_dec, lr))
     b_dec = sub(b_dec, scalar_mul(db_dec, lr))
     W_enc = sub(W_enc, scalar_mul(dW_enc, lr))
@@ -146,10 +130,8 @@ Y_bin = [[1 if v > 0.5 else 0 for v in row] for row in Y]
 for i in range(n):
     original = "".join(str(v) for v in X[i])
     recon = "".join(str(v) for v in Y_bin[i])
-    latent = round(H[i][0], 3)
-    print(f"Input: {original} -> Output: {recon} | Latent: {latent:+.3f}")
-
-print_latent_axis(X, [h[0] for h in H])
+    latent = [round(v, 3) for v in H[i]]
+    print(f"Input: {original} -> Output: {recon} | Latent: {latent}")
 
 print("\nRohwerte (erste 2 Beispiele):")
 for i in range(2):
